@@ -2,29 +2,29 @@ const { chromium } = require('playwright');
 const fetch = require('node-fetch');
 const fs = require('fs');
 
-// ===== 設定 =====
-const API = "https://script.google.com/macros/s/AKfycbyRj-4Q8VQN_4CGsWPmC_neuzvAkeIQSYnvm79BdADkaf3YY2TYjLlZ0JtuJ5V5OfhYxA/exec";
+// ===== 從環境變數讀取 =====
+const API = process.env.API_URL;
+const LINE_TOKEN = (process.env.LINE_TOKEN || '').replace(/\s+/g, '');
 
-// 🔥 自動清除 token 空格
-const LINE_TOKEN = "LsCmEOppEws3IcGNy76VzyJMbgiIbVKTweryWFVV9NIgdUkZ8zB6GFqOu8PkGL3yuG7P2/aGBEYpQnUH3um0+y nTBqsaIrKnYkGD389THNAEYIo40yvP9w94kzAn5B/dBIdknfbiU/rCXqzC1hi5bQdB04t89/1O/w1cDnyilFU="
-  .replace(/\s+/g, '');
-
+// ===== 訂單頁 =====
 const ORDER_URL = "https://sitegiant.co/orders?channel_id=store&status=shipped&status_id=3&tabActive=store";
 
-// ===== 主程式 =====
 (async () => {
-
   try {
-
     console.log("🚀 開始執行");
 
-    // ===== 檢查 auth.json =====
+    // ===== 檢查必要參數 =====
+    if (!API || !LINE_TOKEN) {
+      console.log("❌ 缺少 API_URL 或 LINE_TOKEN");
+      process.exit(1);
+    }
+
     if (!fs.existsSync('auth.json')) {
       console.log("❌ 找不到 auth.json");
       process.exit(1);
     }
 
-    console.log("✅ auth.json 存在");
+    console.log("✅ 環境正常");
 
     // ===== 啟動瀏覽器 =====
     const browser = await chromium.launch({
@@ -36,17 +36,16 @@ const ORDER_URL = "https://sitegiant.co/orders?channel_id=store&status=shipped&s
       storageState: 'auth.json'
     });
 
-    console.log("✅ 已載入登入狀態");
-
     const page = await context.newPage();
 
-    // ===== 🔥 重試進入頁面 =====
+    console.log("🌐 準備進入訂單頁");
+
+    // ===== 重試機制 =====
     let success = false;
 
     for (let i = 0; i < 3; i++) {
       try {
-
-        console.log(`🌐 嘗試進入訂單頁（第${i + 1}次）`);
+        console.log(`👉 第 ${i + 1} 次嘗試`);
 
         await page.goto(ORDER_URL, {
           timeout: 120000,
@@ -69,16 +68,14 @@ const ORDER_URL = "https://sitegiant.co/orders?channel_id=store&status=shipped&s
       process.exit(1);
     }
 
-    // ===== 🔥 驗證登入 =====
-    const currentUrl = page.url();
-
-    if (currentUrl.includes("login")) {
-      console.log("❌ auth.json 已失效（被導回登入頁）");
+    // ===== 檢查是否被導回登入 =====
+    if (page.url().includes("login")) {
+      console.log("❌ 登入失效（auth.json 過期）");
       await browser.close();
       process.exit(1);
     }
 
-    console.log("✅ 登入狀態正常");
+    console.log("✅ 登入正常");
 
     // ===== 抓訂單連結 =====
     const links = await page.evaluate(() => {
@@ -95,13 +92,11 @@ const ORDER_URL = "https://sitegiant.co/orders?channel_id=store&status=shipped&s
 
     console.log("📦 訂單數量:", validLinks.length);
 
-    // ===== 處理訂單 =====
+    // ===== 處理每筆訂單 =====
     for (const link of validLinks) {
 
       try {
-
-        const orderIdMatch = link.match(/\/orders\/(\d+)\/view/);
-        const orderId = orderIdMatch ? orderIdMatch[1] : null;
+        const orderId = link.match(/\/orders\/(\d+)\/view/)?.[1];
 
         console.log("➡️ 處理訂單:", orderId);
 
@@ -112,37 +107,29 @@ const ORDER_URL = "https://sitegiant.co/orders?channel_id=store&status=shipped&s
           waitUntil: 'domcontentloaded'
         });
 
-        await orderPage.waitForLoadState('networkidle');
         await orderPage.waitForTimeout(3000);
 
-        // ===== 抓資料 =====
+        // ===== 抓 email + tracking =====
         const data = await orderPage.evaluate(() => {
 
           let email = null;
 
-          const elements = document.querySelectorAll("div, span");
-
-          elements.forEach(el => {
+          document.querySelectorAll("div, span").forEach(el => {
             const text = el.innerText || "";
 
             if (text.includes("@") && text.length < 100) {
               const match = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-z]{2,}/);
-              if (match && !email) {
-                email = match[0];
-              }
+              if (match && !email) email = match[0];
             }
           });
 
-          const bodyText = document.body.innerText;
-          const trackingMatch = bodyText.match(/\d{8,12}/);
+          const body = document.body.innerText;
+          const tracking = body.match(/\d{8,12}/)?.[0];
 
-          return {
-            email,
-            tracking: trackingMatch ? trackingMatch[0] : null
-          };
+          return { email, tracking };
         });
 
-        console.log("📄 抓到資料:", data);
+        console.log("📄 抓到:", data);
 
         if (!data.email || !data.tracking) {
           console.log("❌ 資料不完整");
@@ -151,7 +138,7 @@ const ORDER_URL = "https://sitegiant.co/orders?channel_id=store&status=shipped&s
         }
 
         // ===== 防重複 =====
-        const checkRes = await fetch(API, {
+        const check = await fetch(API, {
           method: "POST",
           headers: { "Content-Type": "text/plain" },
           body: JSON.stringify({
@@ -159,40 +146,36 @@ const ORDER_URL = "https://sitegiant.co/orders?channel_id=store&status=shipped&s
             email: data.email,
             orderId
           })
-        });
+        }).then(r => r.json());
 
-        const checkData = await checkRes.json();
-
-        if (checkData.sent) {
-          console.log("⛔ 已發過:", orderId);
+        if (check.sent) {
+          console.log("⛔ 已通知過");
           await orderPage.close();
           continue;
         }
 
-        // ===== 查 userId =====
-        const res = await fetch(API, {
+        // ===== 找 LINE user =====
+        const user = await fetch(API, {
           method: "POST",
           headers: { "Content-Type": "text/plain" },
           body: JSON.stringify({
             type: "findEmail",
             email: data.email
           })
-        });
-
-        const user = await res.json();
+        }).then(r => r.json());
 
         if (!user.userId) {
-          console.log("❌ 找不到 userId");
+          console.log("❌ 找不到 LINE user");
           await orderPage.close();
           continue;
         }
 
         // ===== 發 LINE =====
-        const lineRes = await fetch("https://api.line.me/v2/bot/message/push", {
+        const res = await fetch("https://api.line.me/v2/bot/message/push", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Authorization": "Bearer " + LINE_TOKEN
+            "Authorization": `Bearer ${LINE_TOKEN}`
           },
           body: JSON.stringify({
             to: user.userId,
@@ -203,15 +186,15 @@ const ORDER_URL = "https://sitegiant.co/orders?channel_id=store&status=shipped&s
           })
         });
 
-        console.log("📨 LINE狀態:", lineRes.status);
+        console.log("📨 LINE狀態:", res.status);
 
-        if (lineRes.status !== 200) {
+        if (res.status !== 200) {
           console.log("❌ LINE 發送失敗");
           await orderPage.close();
           continue;
         }
 
-        console.log("✅ 已發送:", orderId);
+        console.log("✅ 發送成功");
 
         // ===== 記錄 =====
         await fetch(API, {
@@ -219,12 +202,11 @@ const ORDER_URL = "https://sitegiant.co/orders?channel_id=store&status=shipped&s
           headers: { "Content-Type": "text/plain" },
           body: JSON.stringify({
             type: "markOrder",
-            row: checkData.row,
+            row: check.row,
             orderId
           })
         });
 
-        await orderPage.waitForTimeout(2000);
         await orderPage.close();
 
       } catch (err) {
@@ -235,13 +217,9 @@ const ORDER_URL = "https://sitegiant.co/orders?channel_id=store&status=shipped&s
     console.log("🎉 全部完成");
 
     await browser.close();
-// 🔥 防止 Render 判定為結束
-setInterval(() => {
-  console.log("⏳ keep alive...");
-}, 1000 * 60 * 10); // 每10分鐘
 
   } catch (err) {
     console.log("🔥 系統錯誤:", err);
+    process.exit(1);
   }
-
 })();
