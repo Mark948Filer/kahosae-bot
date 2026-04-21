@@ -235,6 +235,10 @@ const ORDER_URL = "https://sitegiant.co/orders?channel_id=store&status=shipped&s
     console.log("🎉 全部完成");
 
     await browser.close();
+// 🔥 防止 Render 判定為結束
+setInterval(() => {
+  console.log("⏳ keep alive...");
+}, 1000 * 60 * 10); // 每10分鐘
 
   } catch (err) {
     console.log("🔥 系統錯誤:", err);
