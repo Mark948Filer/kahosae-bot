@@ -7,29 +7,27 @@ on:
   workflow_dispatch: # 可手動觸發
 
 jobs:
-  run:
+  run-bot:
     runs-on: ubuntu-latest
 
+    env:
+      API_URL: ${{ secrets.API_URL }}
+      LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
+
     steps:
-      - name: 📥 Checkout
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 🟢 Setup Node
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 18
 
-      - name: 📦 Install dependencies
+      - name: Install
         run: npm install
 
-      - name: 🎭 Install Playwright
+      - name: Install Playwright
         run: npx playwright install chromium
 
-      - name: 🔐 Create auth.json
-        run: echo '${{ secrets.AUTH_JSON }}' > auth.json
-
-      - name: 🚀 Run script
-        env:
-          API_URL: ${{ secrets.API_URL }}
-          LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
+      - name: Run
         run: node script.js
