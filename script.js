@@ -5,7 +5,7 @@ const fs = require('fs');
 // ===== 設定 =====
 const API = "https://script.google.com/macros/s/AKfycbyRj-4Q8VQN_4CGsWPmC_neuzvAkeIQSYnvm79BdADkaf3YY2TYjLlZ0JtuJ5V5OfhYxA/exec";
 
-// 🔥 自動移除空格（避免 token 壞掉）
+// 🔥 自動清除 token 空格
 const LINE_TOKEN = "LsCmEOppEws3IcGNy76VzyJMbgiIbVKTweryWFVV9NIgdUkZ8zB6GFqOu8PkGL3yuG7P2/aGBEYpQnUH3um0+y nTBqsaIrKnYkGD389THNAEYIo40yvP9w94kzAn5B/dBIdknfbiU/rCXqzC1hi5bQdB04t89/1O/w1cDnyilFU="
   .replace(/\s+/g, '');
 
@@ -40,12 +40,36 @@ const ORDER_URL = "https://sitegiant.co/orders?channel_id=store&status=shipped&s
 
     const page = await context.newPage();
 
-    console.log("👉 前往訂單頁");
+    // ===== 🔥 重試進入頁面 =====
+    let success = false;
 
-    await page.goto(ORDER_URL, { timeout: 60000 });
-    await page.waitForTimeout(5000);
+    for (let i = 0; i < 3; i++) {
+      try {
 
-    // ===== 🔥 驗證登入狀態 =====
+        console.log(`🌐 嘗試進入訂單頁（第${i + 1}次）`);
+
+        await page.goto(ORDER_URL, {
+          timeout: 120000,
+          waitUntil: 'domcontentloaded'
+        });
+
+        await page.waitForTimeout(8000);
+
+        success = true;
+        break;
+
+      } catch (err) {
+        console.log("⚠️ 進入失敗，重試中...");
+      }
+    }
+
+    if (!success) {
+      console.log("❌ 無法進入 Sitegiant（可能被擋）");
+      await browser.close();
+      process.exit(1);
+    }
+
+    // ===== 🔥 驗證登入 =====
     const currentUrl = page.url();
 
     if (currentUrl.includes("login")) {
@@ -71,7 +95,7 @@ const ORDER_URL = "https://sitegiant.co/orders?channel_id=store&status=shipped&s
 
     console.log("📦 訂單數量:", validLinks.length);
 
-    // ===== 逐筆處理 =====
+    // ===== 處理訂單 =====
     for (const link of validLinks) {
 
       try {
@@ -82,7 +106,11 @@ const ORDER_URL = "https://sitegiant.co/orders?channel_id=store&status=shipped&s
         console.log("➡️ 處理訂單:", orderId);
 
         const orderPage = await context.newPage();
-        await orderPage.goto(link, { timeout: 60000 });
+
+        await orderPage.goto(link, {
+          timeout: 120000,
+          waitUntil: 'domcontentloaded'
+        });
 
         await orderPage.waitForLoadState('networkidle');
         await orderPage.waitForTimeout(3000);
