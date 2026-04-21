@@ -1,0 +1,12 @@
+{
+  "name": "kahosae-bot",
+  "version": "1.0.0",
+  "main": "script.js",
+  "scripts": {
+    "start": "node script.js"
+  },
+  "dependencies": {
+    "playwright": "^1.0.0",
+    "node-fetch": "^2.6.7"
+  }
+}
